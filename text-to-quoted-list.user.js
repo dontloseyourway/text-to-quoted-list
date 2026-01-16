@@ -1,13 +1,15 @@
 // ==UserScript==
 // @name         text-to-quoted-list
 // @namespace    https://local.codebuddy/text-to-quoted-list
-// @version      0.3.2
+// @version      0.3.3
 // @description  将以逗号/分号/空格/换行/Tab 分隔的文本转换为带引号列表（单引号/双引号），支持一键复制。
 // @author       haoyunzheng
 // @match        *://*/*
 // @run-at       document-end
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @updateURL    https://raw.githubusercontent.com/dontloseyourway/text-to-quoted-list/main/text-to-quoted-list.user.js
+// @downloadURL  https://raw.githubusercontent.com/dontloseyourway/text-to-quoted-list/main/text-to-quoted-list.user.js
 // ==/UserScript==
 
 (() => {
