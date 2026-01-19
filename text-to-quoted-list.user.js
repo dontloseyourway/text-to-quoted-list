@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         text-to-quoted-list
 // @namespace    https://local.codebuddy/text-to-quoted-list
-// @version      0.3.3
+// @version      0.3.4
 // @description  将以逗号/分号/空格/换行/Tab 分隔的文本转换为带引号列表（单引号/双引号），支持一键复制。
 // @author       haoyunzheng
 // @match        *://*/*
@@ -73,7 +73,7 @@
   }
 
   // 判断文本是否像"分隔符分隔的列表"（至少2项，且含分隔符）
-  // 排除 SQL/代码等误识别
+  // 排除 SQL/代码/自然语言句子等误识别
   function looksLikeSeparatedList(text) {
     const trimmed = safeTrim(text);
     if (!trimmed || trimmed.length > 10000) return false; // 太长不处理
@@ -99,7 +99,36 @@
     // 要求每个 token 都像"简单值"：字母/数字/下划线/中划线/中文，且不包含连续特殊字符
     const simpleTokenRe = /^[\w\u4e00-\u9fff\-._@#]+$/;
     const allSimple = tokens.every((t) => simpleTokenRe.test(t) && t.length <= 200);
-    return allSimple;
+    if (!allSimple) return false;
+
+    // ===== 排除自然语言句子 =====
+    // 计算平均 token 长度
+    const totalLen = tokens.reduce((sum, t) => sum + t.length, 0);
+    const avgLen = totalLen / tokens.length;
+
+    // 启发式 1：如果平均 token 长度 > 4 且 token 中包含大量中文字符，很可能是句子
+    // 列表通常是短 ID/编号（如 A001, 12345），平均长度较短
+    const chineseCharCount = trimmed.replace(/[^\u4e00-\u9fff]/g, '').length;
+    const chineseRatio = chineseCharCount / trimmed.length;
+
+    // 如果中文占比 > 50% 且平均 token 长度 > 3，认为是句子而非列表
+    if (chineseRatio > 0.5 && avgLen > 3) return false;
+
+    // 启发式 2：如果存在很长的中文 token（> 6 个字符），很可能是句子片段
+    const hasLongChineseToken = tokens.some((t) => {
+      const cjkLen = t.replace(/[^\u4e00-\u9fff]/g, '').length;
+      return cjkLen > 6;
+    });
+    if (hasLongChineseToken) return false;
+
+    // 启发式 3：列表的 token 长度应该相对均匀
+    // 如果最长 token 是最短 token 的 5 倍以上（且最短 > 0），可能是句子
+    const lengths = tokens.map((t) => t.length);
+    const maxLen = Math.max(...lengths);
+    const minLen = Math.min(...lengths);
+    if (minLen > 0 && maxLen / minLen > 5 && tokens.length < 10) return false;
+
+    return true;
   }
 
   function escapeSqlSingleQuote(s) {
