@@ -15,6 +15,9 @@
 (() => {
   'use strict';
 
+  // 只在顶层窗口运行，避免 iframe 中重复创建 Logo
+  if (window !== window.top) return;
+
   /**
    * 设计目标：尽量不影响页面样式/事件。
    * - 使用 Shadow DOM 隔离样式
