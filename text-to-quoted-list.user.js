@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         text-to-quoted-list
 // @namespace    https://local.codebuddy/text-to-quoted-list
-// @version      0.3.4
+// @version      0.3.5
 // @description  将以逗号/分号/空格/换行/Tab 分隔的文本转换为带引号列表（单引号/双引号），支持一键复制。
 // @author       haoyunzheng
 // @match        *://*/*
