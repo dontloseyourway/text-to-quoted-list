@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         text-to-quoted-list
 // @namespace    https://local.codebuddy/text-to-quoted-list
-// @version      0.3.5
+// @version      0.3.9
 // @description  将以逗号/分号/空格/换行/Tab 分隔的文本转换为带引号列表（单引号/双引号），支持一键复制。
 // @author       haoyunzheng
 // @match        *://*/*
@@ -10,13 +10,32 @@
 // @grant        GM_setValue
 // @updateURL    https://raw.githubusercontent.com/dontloseyourway/text-to-quoted-list/main/text-to-quoted-list.user.js
 // @downloadURL  https://raw.githubusercontent.com/dontloseyourway/text-to-quoted-list/main/text-to-quoted-list.user.js
+// @noframes
 // ==/UserScript==
 
 (() => {
   'use strict';
 
   // 只在顶层窗口运行，避免 iframe 中重复创建 Logo
-  if (window !== window.top) return;
+  // - `@noframes` 已从源头禁用 frames 注入；这里是运行时兜底（含跨域 top 访问可能抛异常的情况）
+  function isTopWindow() {
+    try {
+      if (window.self !== window.top) return false;
+    } catch {
+      // 无法访问 top（跨域/隔离环境），当作非顶层
+      return false;
+    }
+    // 额外兜底：有些环境下 self===top 仍可能处于 frame 中
+    try {
+      if (window.frameElement) return false;
+    } catch {
+      // 读取 frameElement 失败，保守处理
+      return false;
+    }
+    return true;
+  }
+
+  if (!isTopWindow()) return;
 
   /**
    * 设计目标：尽量不影响页面样式/事件。
@@ -199,7 +218,29 @@
   }
 
   function mount() {
-    if (document.getElementById(APP.ids.host)) return;
+    const TTQL = window.__TTQL__ || (window.__TTQL__ = {});
+    if (TTQL.mounting) return;
+    TTQL.mounting = true;
+
+    const selector = `#${APP.ids.host}`;
+    const hosts = Array.from(document.querySelectorAll(selector));
+    if (hosts.length > 1) {
+      const keep = hosts.find((h) => h.shadowRoot) || hosts[0];
+      for (const h of hosts) {
+        if (h !== keep) h.remove();
+      }
+    }
+
+    const existing = document.getElementById(APP.ids.host);
+    if (existing) {
+      if (existing.shadowRoot) {
+        TTQL.mounted = true;
+        TTQL.mounting = false;
+        return;
+      }
+      // 避免残留空壳阻止重挂载
+      existing.remove();
+    }
 
     const host = document.createElement('div');
     host.id = APP.ids.host;
@@ -583,6 +624,8 @@
       state.panelVisible = !!visible;
 
       if (state.panelVisible) {
+        // 面板可见时，host 接收点击以支持"点击空白处隐藏"
+        host.style.pointerEvents = 'auto';
         root.style.display = 'block';
         root.style.visibility = 'hidden';
         root.classList.remove('show');
@@ -595,6 +638,8 @@
         return;
       }
 
+      // 面板隐藏时，恢复穿透
+      host.style.pointerEvents = 'none';
       root.classList.remove('show');
       // 留一点时间给淡出动画
       setTimeout(() => {
@@ -708,14 +753,19 @@
       hidePanel();
     });
 
-    // Logo 点击展开面板（只有在非拖拽时触发）
+    // Logo 点击切换面板显示/隐藏（只有在非拖拽时触发）
     logo.addEventListener('click', (e) => {
       // 如果刚刚拖拽过，不触发点击
       if (logo.dataset.justDragged === 'true') {
         logo.dataset.justDragged = 'false';
         return;
       }
-      showPanel();
+      // 切换：面板可见则隐藏，不可见则显示
+      if (state.panelVisible) {
+        hidePanel();
+      } else {
+        showPanel();
+      }
     });
 
     // Logo 拖拽功能
@@ -728,9 +778,6 @@
     }
 
     function onDragStart(e) {
-      // 拖拽时自动收起浮层，避免遮挡与误触
-      hidePanel();
-
       state.isDragging = true;
       state.dragStartY = e.type.startsWith('touch') ? e.touches[0].clientY : e.clientY;
       state.dragStartLogoY = state.logoY;
@@ -749,9 +796,10 @@
       if (state.isDragging) {
         state.isDragging = false;
         logo.classList.remove('dragging');
-        // 如果移动超过5px，标记为刚拖拽过，阻止 click
+        // 如果移动超过5px，标记为刚拖拽过，阻止 click，并隐藏面板
         if (Math.abs(state.logoY - state.dragStartLogoY) > 5) {
           logo.dataset.justDragged = 'true';
+          hidePanel();
         }
       }
     }
@@ -885,17 +933,43 @@
       true
     );
 
-    // 点击页面空白处自动隐藏（Shadow DOM 使用 composedPath 判断）
-    document.addEventListener(
-      'pointerdown',
-      (e) => {
-        if (!state.panelVisible) return;
-        const path = e.composedPath?.() ?? [];
-        if (path.includes(root) || path.includes(logo)) return;
-        hidePanel();
-      },
-      true
-    );
+    // 点击页面空白处自动隐藏
+    // 使用多种事件增加兼容性：pointerdown + mousedown + touchstart
+    // 标记 Logo 交互时间，避免与点击隐藏冲突
+    let lastLogoInteractTime = 0;
+    function markLogoInteract() {
+      lastLogoInteractTime = Date.now();
+    }
+    logo.addEventListener('mousedown', markLogoInteract, true);
+    logo.addEventListener('touchstart', markLogoInteract, true);
+    logo.addEventListener('pointerdown', markLogoInteract, true);
+
+    function handleOutsideInteraction(e) {
+      if (!state.panelVisible) return;
+      // 如果刚刚与 Logo 交互，跳过（避免事件竞争）
+      if (Date.now() - lastLogoInteractTime < 100) return;
+      // 如果正在拖拽，跳过
+      if (state.isDragging) return;
+      // 尝试多种方式判断点击是否在工具区域内
+      const path = e.composedPath?.() ?? (e.path || []);
+      if (path.includes(root) || path.includes(logo) || path.includes(container)) return;
+      hidePanel();
+    }
+    document.addEventListener('pointerdown', handleOutsideInteraction, true);
+    document.addEventListener('mousedown', handleOutsideInteraction, true);
+    document.addEventListener('touchstart', handleOutsideInteraction, { capture: true, passive: true });
+
+    // 在 host 上监听点击（当面板可见时 host 会接收点击）
+    // 这是对某些页面阻止了 document 事件的兜底方案
+    host.addEventListener('mousedown', (e) => {
+      if (!state.panelVisible) return;
+      if (Date.now() - lastLogoInteractTime < 100) return;
+      if (state.isDragging) return;
+      // 如果点击的是 shadow 内部的 root/logo/container，不隐藏
+      const path = e.composedPath?.() ?? [];
+      if (path.includes(root) || path.includes(logo) || path.includes(container)) return;
+      hidePanel();
+    });
 
     // Esc 快捷收起
     document.addEventListener(
@@ -929,6 +1003,8 @@
       // 默认隐藏面板，只显示 Logo
       setPanelVisible(false);
     })();
+
+    TTQL.mounting = false;
   }
 
   // 一些页面在 document-end 时 body 仍未就绪，这里兜底等一下。
