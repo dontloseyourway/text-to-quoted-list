@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         text-to-quoted-list
 // @namespace    https://local.codebuddy/text-to-quoted-list
-// @version      0.3.9
-// @description  将以逗号/分号/空格/换行/Tab 分隔的文本转换为带引号列表（单引号/双引号），支持一键复制。
+// @version      0.4.0
+// @description  将以逗号/分号/空格/换行/Tab 分隔的文本转换为带引号列表（单引号/双引号/纯逗号），支持一键复制。
 // @author       haoyunzheng
 // @match        *://*/*
 // @run-at       document-end
@@ -168,6 +168,10 @@
       return tokens.map((t) => `'${escapeSqlSingleQuote(t)}'`).join(',');
     }
     return tokens.map((t) => `"${escapeDoubleQuoteForCode(t)}"`).join(',');
+  }
+
+  function formatPlainComma(tokens) {
+    return tokens.join(',');
   }
 
   function createEl(doc, tag, attrs = {}, children = []) {
@@ -490,6 +494,7 @@
       tokens: [],
       outSingle: '',
       outDouble: '',
+      outPlain: '',
       toastTimer: null,
       logoY: 16, // Logo 距离底部的距离
       isDragging: false,
@@ -541,12 +546,15 @@
 
     const outSingleTa = createEl(doc, 'textarea', { class: 'ta outTa', readonly: true, placeholder: "'值1','值2'" });
     const outDoubleTa = createEl(doc, 'textarea', { class: 'ta outTa', readonly: true, placeholder: '"值1","值2"' });
+    const outPlainTa = createEl(doc, 'textarea', { class: 'ta outTa', readonly: true, placeholder: '值1,值2' });
 
     const singleCount = createEl(doc, 'span', { class: 'sectionMeta' }, ['0 项']);
     const doubleCount = createEl(doc, 'span', { class: 'sectionMeta' }, ['0 项']);
+    const plainCount = createEl(doc, 'span', { class: 'sectionMeta' }, ['0 项']);
 
     const btnCopySingle = createEl(doc, 'button', { class: 'btn btnSub', type: 'button' }, ['复制单引号']);
     const btnCopyDouble = createEl(doc, 'button', { class: 'btn btnSub', type: 'button' }, ['复制双引号']);
+    const btnCopyPlain = createEl(doc, 'button', { class: 'btn btnSub', type: 'button' }, ['复制纯逗号']);
 
     const sectionSingle = createEl(doc, 'div', { class: 'section' }, [
       createEl(doc, 'div', { class: 'sectionHd' }, [
@@ -564,14 +572,23 @@
       createEl(doc, 'div', { style: 'padding: 8px 10px 10px 10px;' }, [outDoubleTa]),
     ]);
 
+    const sectionPlain = createEl(doc, 'div', { class: 'section' }, [
+      createEl(doc, 'div', { class: 'sectionHd' }, [
+        createEl(doc, 'div', { class: 'sectionTitle' }, ['纯逗号（无引号）']),
+        createEl(doc, 'div', { style: 'display:flex; align-items:center; gap:10px;' }, [plainCount, btnCopyPlain]),
+      ]),
+      createEl(doc, 'div', { style: 'padding: 8px 10px 10px 10px;' }, [outPlainTa]),
+    ]);
+
     const body = createEl(doc, 'div', { class: 'body' }, [
       inputTa,
       createEl(doc, 'div', { class: 'row' }, [btnConvert, btnFromSelection, btnClear, btnSample]),
       hint,
       sectionSingle,
       sectionDouble,
+      sectionPlain,
       createEl(doc, 'div', { class: 'smallHint' }, [
-        '小技巧：你可以直接复制 “1,2,3” 或者一列 ID；脚本会自动识别分隔符并输出。',
+        '小技巧：你可以直接复制 "1,2,3" 或者一列 ID；脚本会自动识别分隔符并输出。',
       ]),
     ]);
 
@@ -667,12 +684,15 @@
       state.tokens = parseTokens(input);
       state.outSingle = formatQuotedList(state.tokens, "'");
       state.outDouble = formatQuotedList(state.tokens, '"');
+      state.outPlain = formatPlainComma(state.tokens);
 
       outSingleTa.value = state.outSingle;
       outDoubleTa.value = state.outDouble;
+      outPlainTa.value = state.outPlain;
 
       singleCount.textContent = `${state.tokens.length} 项`;
       doubleCount.textContent = `${state.tokens.length} 项`;
+      plainCount.textContent = `${state.tokens.length} 项`;
 
       gmSet(APP.storageKeys.input, input);
     }
@@ -713,7 +733,7 @@
       }
     });
 
-    // 避免“本工具内部复制”触发自动弹层
+    // 避免"本工具内部复制"触发自动弹层
     let ignoreAutoPopupUntil = 0;
     let lastCopyGestureAt = 0;
 
@@ -745,6 +765,17 @@
       }
       const ok = await copyToClipboard(state.outDouble);
       showToast(ok ? '已复制（双引号）' : '复制失败（双引号）');
+    });
+
+    btnCopyPlain.addEventListener('click', async () => {
+      markIgnoreAutoPopup();
+      compute();
+      if (!state.outPlain) {
+        showToast('纯逗号结果为空');
+        return;
+      }
+      const ok = await copyToClipboard(state.outPlain);
+      showToast(ok ? '已复制（纯逗号）' : '复制失败（纯逗号）');
     });
 
     btnCollapse.addEventListener('click', () => setCollapsed(!state.collapsed));
